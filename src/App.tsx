@@ -10,21 +10,28 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Play, Pause, RotateCcw } from 'lucide-react';
 
 const cannonImg = new Image();
 cannonImg.crossOrigin = "anonymous";
 cannonImg.src = 'https://i.postimg.cc/6pYxZnb6/flash3.png';
 
-const fishImages = [new Image(), new Image(), new Image()];
+const fishImages = [new Image(), new Image(), new Image(), new Image()];
 fishImages[0].crossOrigin = "anonymous";
 fishImages[0].src = 'https://i.postimg.cc/3NVSP4J4/fish4.png'; // 魚的圖片
 fishImages[1].crossOrigin = "anonymous";
 fishImages[1].src = 'https://i.postimg.cc/mkGb3D74/fish7.png'; // 魚的圖片
 fishImages[2].crossOrigin = "anonymous";
 fishImages[2].src = 'https://i.postimg.cc/hGh1L40v/fish6.png'; // 魚的圖片
+fishImages[3].crossOrigin = "anonymous";
+fishImages[3].src = 'https://i.postimg.cc/rw6wMfDQ/fish8.png'; // 魚的圖片
 
 // 同樣建議加上 crossOrigin 避免報錯
-fishImages.forEach(img => img.crossOrigin = "anonymous");
+fishImages.forEach((img, index) => {
+  img.crossOrigin = "anonymous";
+  img.onload = () => console.log(`Fish image ${index} loaded successfully`);
+  img.onerror = () => console.error(`Failed to load fish image ${index}: ${img.src}`);
+});
 
 interface Fish {
   id: number;
@@ -58,6 +65,49 @@ export default function App() {
   const isStrugglingRef = useRef(false);
   const [score, setScore] = useState(0);
   const [strugglingFishIds, setStrugglingFishIds] = useState<number[]>([]);
+  const [isPaused, setIsPaused] = useState(false);
+  const isPausedRef = useRef(false);
+  const [gameKey, setGameKey] = useState(0);
+
+  const colors = ['#FFD700', '#FF4500', '#00CED1', '#FF69B4', '#ADFF2F'];
+  
+  const createFish = (id: number): Fish => {
+    const size = 30 + Math.random() * 60;
+    
+    let imageIndex = Math.floor(Math.random() * fishImages.length);
+    if (imageIndex === 3) {
+      const hasFish3 = fishRef.current.some(f => f.imageIndex === 3 && !f.isDead);
+      if (hasFish3) {
+        imageIndex = Math.floor(Math.random() * 3);
+      }
+    }
+
+    return {
+      id,
+      x: Math.random() > 0.5 ? -100 : window.innerWidth + 100,
+      y: 100 + Math.random() * (window.innerHeight - 300),
+      speed: 0.8 + Math.random() * 1.5,
+      size,
+      direction: 0,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      isDead: false,
+      isStruggling: false,
+      struggleTimeLeft: 0,
+      clicksNeeded: Math.max(2, Math.floor(size / 10) - 1),
+      currentClicks: 0,
+      imageIndex,
+    };
+  };
+
+  const handleRestart = () => {
+    setScore(0);
+    setStrugglingFishIds([]);
+    setIsPaused(false);
+    isPausedRef.current = false;
+    isStrugglingRef.current = false;
+    bulletsRef.current = [];
+    setGameKey(prev => prev + 1);
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -74,34 +124,13 @@ export default function App() {
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
-    const colors = ['#FFD700', '#FF4500', '#00CED1', '#FF69B4', '#ADFF2F'];
-    const createFish = (id: number): Fish => {
-
-      // 現在改成 40 + Math.random() * 60 (40~100)，讓魚變大兩倍左右
-      const size = 20 + Math.random() * 60;
-      return {
-        id,
-        x: Math.random() > 0.5 ? -100 : canvas.width + 100,
-        y: 100 + Math.random() * (canvas.height - 300),
-        speed: 0.8 + Math.random() * 1.5,
-        size,
-        direction: 0,
-        color: colors[Math.floor(Math.random() * colors.length)],
-        isDead: false,
-        isStruggling: false,
-        struggleTimeLeft: 0,
-        clicksNeeded: Math.max(2, Math.floor(size / 10) - 1),
-        currentClicks: 0,
-        imageIndex: Math.floor(Math.random() * fishImages.length),
-      };
-    };
-
-    fishRef.current = Array.from({ length: 10 }, (_, i) => {
+    fishRef.current = [];
+    for (let i = 0; i < 10; i++) {
       const f = createFish(i);
       f.x = Math.random() * canvas.width;
       f.direction = Math.random() > 0.5 ? 1 : -1;
-      return f;
-    });
+      fishRef.current.push(f);
+    }
 
     const handleMouseMove = (e: MouseEvent) => {
       mousePosRef.current = { x: e.clientX, y: e.clientY };
@@ -113,6 +142,9 @@ export default function App() {
 
       // Don't fire if a fish is currently struggling (Reel In button is visible)
       if (isStrugglingRef.current) return;
+
+      // Don't fire if paused
+      if (isPausedRef.current) return;
 
       const centerX = canvas.width / 2;
       const centerY = canvas.height;
@@ -230,6 +262,11 @@ export default function App() {
       const deltaTime = time - lastTime;
       lastTime = time;
 
+      if (isPausedRef.current) {
+        animationFrameId = requestAnimationFrame(render);
+        return;
+      }
+
       ctx.fillStyle = '#000000';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -281,7 +318,7 @@ export default function App() {
           const dy = f1.y - f2.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
           // 魚的寬度是 size*2，高度是 size。設定安全距離避免重疊
-          const minDist = f1.size + f2.size + 50; 
+          const minDist = f1.size + f2.size + 80; 
 
           if (dist < minDist && dist > 0) {
             // 當兩隻魚太靠近時，在 Y 軸上產生排斥力把牠們推開
@@ -297,8 +334,8 @@ export default function App() {
             }
             
             // 確保魚不會被擠出畫面外 (上方留 100，下方留 300)
-            f1.y = Math.max(100, Math.min(canvas.height - 300, f1.y));
-            f2.y = Math.max(100, Math.min(canvas.height - 300, f2.y));
+            f1.y = Math.max(100, Math.min(canvas.height - 200, f1.y));
+            f2.y = Math.max(100, Math.min(canvas.height - 200, f2.y));
           }
         }
       }
@@ -393,7 +430,7 @@ export default function App() {
       window.removeEventListener('click', handleClick);
       cancelAnimationFrame(animationFrameId);
     };
-  }, []);
+  }, [gameKey]);
 
   const handleReelIn = () => {
     if (strugglingFishIds.length === 0) return;
@@ -413,24 +450,9 @@ export default function App() {
         setTimeout(() => {
           const index = fishRef.current.findIndex(f => f.id === targetId);
           if (index !== -1) {
-            const colors = ['#FFD700', '#FF4500', '#00CED1', '#FF69B4', '#ADFF2F'];
-            // 重新生成時也套用新的大尺寸
-            const size = 40 + Math.random() * 60;
-            const newFish: Fish = {
-              id: targetId,
-              x: Math.random() > 0.5 ? -100 : window.innerWidth + 100,
-              y: 100 + Math.random() * (window.innerHeight - 300),
-              speed: 0.8 + Math.random() * 1.5,
-              size,
-              direction: Math.random() > 0.5 ? 1 : -1,
-              color: colors[Math.floor(Math.random() * colors.length)],
-              isDead: false,
-              isStruggling: false,
-              struggleTimeLeft: 0,
-              clicksNeeded: Math.max(2, Math.floor(size / 10) - 1),
-              currentClicks: 0,
-              imageIndex: Math.floor(Math.random() * fishImages.length),
-            };
+            const newFish = createFish(targetId);
+            newFish.direction = Math.random() > 0.5 ? 1 : -1;
+            newFish.x = newFish.direction === 1 ? -100 : window.innerWidth + 100;
             fishRef.current[index] = newFish;
           }
         }, 2000);
@@ -455,6 +477,30 @@ export default function App() {
             捕魚分數 {score.toString().padStart(6, '0')}
           </p>
         </div>
+      </div>
+
+      {/* Controls */}
+      <div className="absolute top-8 right-8 z-50 flex gap-4">
+        <button
+          onClick={() => {
+            setIsPaused(prev => {
+              const next = !prev;
+              isPausedRef.current = next;
+              return next;
+            });
+          }}
+          className="flex items-center justify-center w-12 h-12 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold rounded-lg backdrop-blur-sm transition-all shadow-[0_0_15px_rgba(255,255,255,0.1)] hover:shadow-[0_0_20px_rgba(255,255,255,0.3)] active:scale-95"
+          title={isPaused ? '繼續遊戲' : '暫停'}
+        >
+          {isPaused ? <Play className="w-6 h-6 fill-current" /> : <Pause className="w-6 h-6 fill-current" />}
+        </button>
+        <button
+          onClick={handleRestart}
+          className="flex items-center justify-center w-12 h-12 bg-red-500/80 hover:bg-red-500 border border-red-500/50 text-white font-bold rounded-lg backdrop-blur-sm transition-all shadow-[0_0_15px_rgba(239,68,68,0.3)] hover:shadow-[0_0_20px_rgba(239,68,68,0.5)] active:scale-95"
+          title="重新開始"
+        >
+          <RotateCcw className="w-6 h-6" />
+        </button>
       </div>
 
       {/* Reel In Button */}
