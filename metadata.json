@@ -1,0 +1,5 @@
+{
+  "name": "深海捕魚趣",
+  "description": "一個基於 HTML5 Canvas 的基礎捕魚遊戲介面，包含深海背景與游動的魚群。",
+  "requestFramePermissions": []
+}
